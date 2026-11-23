@@ -1,0 +1,33 @@
+#!/bin/sh
+# Incrémente automatiquement la version du cache du service worker (sw.js)
+# quand un fichier mis en cache par l'app fait partie du commit.
+# Sans ça, les téléphones garderaient l'ancienne version (stratégie « cache d'abord »).
+#
+# Activation (une fois par clone) :  git config core.hooksPath .githooks
+
+SW=sw.js
+[ -f "$SW" ] || exit 0
+
+# Fichiers de l'app modifiés dans ce commit (ceux listés dans FILES de sw.js)
+changed=$(git diff --cached --name-only --diff-filter=ACMRD | grep -E '^(index\.html|manifest\.webmanifest|css/|js/|vendor/|fonts/|icons/)')
+[ -n "$changed" ] || exit 0
+
+# Version déjà changée à la main dans ce commit : on ne touche à rien
+if git diff --cached -U0 -- "$SW" | grep -qE "^\+const CACHE = "; then
+  exit 0
+fi
+
+current=$(sed -n "s/^const CACHE = 'kayit-v\([0-9]*\.[0-9]*\.[0-9]*\)';.*/\1/p" "$SW")
+if [ -z "$current" ]; then
+  echo "pre-commit : ligne « const CACHE = 'kayit-vX.Y.Z'; » introuvable dans $SW" >&2
+  exit 1
+fi
+
+major=$(echo "$current" | cut -d. -f1)
+minor=$(echo "$current" | cut -d. -f2)
+patch=$(echo "$current" | cut -d. -f3)
+next="$major.$minor.$((patch + 1))"
+
+sed -i "s/^const CACHE = 'kayit-v$current';/const CACHE = 'kayit-v$next';/" "$SW"
+git add "$SW"
+echo "pre-commit : cache du service worker kayit-v$current -> kayit-v$next"
