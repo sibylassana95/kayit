@@ -7,9 +7,11 @@ PWA 100 % locale pour ranger au même endroit **tes alias PI-SPI** et **tous tes
 - **Scanner ou importer** : caméra, capture d'écran ou photo. Le QR est lu sur le téléphone (jsQR et, si disponible, le BarcodeDetector natif). L'alias est détecté automatiquement (format UUID et QR EMVCo).
 - **Retrouver ses QR** : l'image d'origine est gardée. Tu peux aussi afficher un « QR net » recréé à l'identique depuis le contenu du QR, puis l'enregistrer ou le partager en PNG.
 - **Carnet** : proches et marchands, scannés une fois, gardés ici.
-- **Profil public** : un seul lien qui contient les moyens de paiement que tu as cochés. Les données sont dans la partie après le `#` du lien, que le navigateur n'envoie jamais au serveur. Le lien existe aussi en QR. La personne qui l'ouvre peut tout enregistrer dans son propre carnet.
 - **Logos** : importe une fois le logo d'un établissement (une capture de l'icône de l'app suffit, recadrée automatiquement). Il s'affiche sur tous tes codes, et en petit sur les contacts du carnet qui utilisent cet établissement. Tu peux les gérer depuis le formulaire ou dans Réglages › Logos des établissements. Kayit n'embarque aucun logo officiel : ce sont des marques déposées.
-- **Sauvegarde** : export et restauration en `.json`, logos compris.
+- **Étiquettes** : ajoute des étiquettes à un code ou un contact (ex. « Travail », « Famille ») et filtre par étiquette.
+- **Code d'accès** : code à 4–6 chiffres (Réglages › Verrouillage), demandé à l'ouverture et après une minute en arrière-plan. C'est une protection contre l'ouverture accidentelle, pas un chiffrement des données.
+- **QR en plein écran** : pour montrer un QR à un caissier ou un vendeur. La luminosité se règle sur le téléphone : le web ne peut pas la changer.
+- **Sauvegarde** : export et restauration en `.json`, logos compris. Un rappel s'affiche tous les 30 jours par défaut (Réglages › Rappel d'export).
 - Thème sombre, clair ou automatique. Fonctionne hors ligne et s'installe sur l'écran d'accueil.
 
 ## Ce que Kayit ne fait pas
@@ -28,7 +30,6 @@ La caméra et le mode hors ligne exigent **HTTPS** (ou `localhost`). Sur le tél
 ## Mettre en ligne (fichiers statiques, aucun backend)
 - **O2switch** : crée un sous-domaine (ex. `kayit.lassanasiby.com`), active AutoSSL, puis envoie le contenu du dossier dans sa racine. Pas besoin de Passenger.
 - **Vercel / Netlify / GitHub Pages** : déploie le dossier tel quel.
-- Ensuite, dans **Réglages › Adresse publique**, indique l'URL finale si tu génères tes liens depuis une autre adresse.
 
 Après une mise à jour, change `CACHE` dans `sw.js` (ex. `kayit-v1.0.1`) pour que les téléphones récupèrent la nouvelle version.
 
@@ -36,7 +37,7 @@ Après une mise à jour, change `CACHE` dans `sw.js` (ex. `kayit-v1.0.1`) pour q
 ```
 index.html             page unique, sprite d'icônes, CSP
 css/app.css            design « Nuit de Dakar » (encre + citron vert, cartes ticket)
-js/app.js              vues, formulaires, profil public, sauvegarde
+js/app.js              vues, formulaires, sauvegarde
 js/qr.js               lecture (caméra/image) et génération de QR
 js/db.js               stockage IndexedDB
 sw.js                  cache hors ligne

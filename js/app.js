@@ -24,8 +24,7 @@ const S = {
   view: 'codes',
   q: { codes: '', carnet: '' },
   filter: { codes: 'all', carnet: 'all' },
-  profile: { name: '', bio: '', ids: [], base: '' },
-  settings: { theme: 'auto' },
+  settings: { theme: 'auto', exportEvery: 30 },
   logos: {},
   installEvt: null,
 };
@@ -147,7 +146,6 @@ async function shareOrDownloadImage(dataUrl, filename, title) {
 // ---------------------------------------------------------------- Persistance
 async function load() {
   S.items = (await db.all()) || [];
-  S.profile = Object.assign(S.profile, (await db.get('profile')) || {});
   S.settings = Object.assign(S.settings, (await db.get('settings')) || {});
   S.logos = (await db.get('logos')) || {};
   // anciens logos posés sur un seul code : on les range dans la bibliothèque
@@ -162,10 +160,7 @@ async function save(it) {
 async function remove(id) {
   await db.del(id);
   S.items = S.items.filter(x => x.id !== id);
-  S.profile.ids = S.profile.ids.filter(x => x !== id);
-  await db.set('profile', S.profile);
 }
-const saveProfile = () => db.set('profile', { ...S.profile });
 const saveSettings = () => db.set('settings', { ...S.settings });
 
 function applyTheme() {
@@ -179,7 +174,7 @@ function sorted(list) {
 function matches(it, q) {
   if (!q) return true;
   const c = country(it.country);
-  const hay = norm([it.name, it.provider, it.label, it.alias, it.qrText, it.note, c && c[1], it.ctype].join(' '));
+  const hay = norm([it.name, it.provider, it.label, it.alias, it.qrText, it.note, c && c[1], it.ctype, (it.tags || []).join(' ')].join(' '));
   return norm(q).split(/\s+/).every(w => hay.includes(w));
 }
 
@@ -193,6 +188,7 @@ function ticket(it, i = 0) {
   const tags = [];
   if (it.owner === 'carnet') tags.push(`<span class="tag">${it.ctype === 'marchand' ? 'Marchand' : 'Proche'}</span>`);
   tags.push(it.type === 'alias' ? '<span class="tag pi">PI-SPI</span>' : '<span class="tag">QR</span>');
+  (it.tags || []).slice(0, 2).forEach(t => tags.push(`<span class="tag">#${esc(t)}</span>`));
   const thumb = it.type === 'qr' && (it.qrImg || it.qrText)
     ? `<span class="t-thumb">${safeImg(it.qrImg) ? `<img src="${safeImg(it.qrImg)}" alt="">` : qrSvg(it.qrText)}</span>` : '';
   const isUrl = !it.alias && /^https?:/i.test(val);
@@ -233,8 +229,11 @@ function viewList(kind) {
   const chipsDef = kind === 'codes'
     ? [['all', 'Tous', all.length], ['alias', 'Alias PI-SPI', all.filter(i => i.type === 'alias').length], ['qr', 'Autres QR', all.filter(i => i.type === 'qr').length], ['fav', 'Favoris', all.filter(i => i.fav).length]]
     : [['all', 'Tous', all.length], ['proche', 'Proches', all.filter(i => i.ctype !== 'marchand').length], ['marchand', 'Marchands', all.filter(i => i.ctype === 'marchand').length], ['fav', 'Favoris', all.filter(i => i.fav).length]];
+  const tagNames = [...new Set(all.flatMap(i => i.tags || []))].sort((a, b) => a.localeCompare(b, 'fr'));
+  chipsDef.push(...tagNames.map(t => [`tag:${t}`, `#${t}`, all.filter(i => (i.tags || []).includes(t)).length]));
   const pass = it => f === 'all' || (f === 'fav' && it.fav) || (f === 'alias' && it.type === 'alias') || (f === 'qr' && it.type === 'qr')
-    || (f === 'proche' && it.ctype !== 'marchand') || (f === 'marchand' && it.ctype === 'marchand');
+    || (f === 'proche' && it.ctype !== 'marchand') || (f === 'marchand' && it.ctype === 'marchand')
+    || (f.startsWith('tag:') && (it.tags || []).includes(f.slice(4)));
   const list = sorted(all.filter(pass).filter(it => matches(it, q)));
 
   const title = kind === 'codes' ? 'Mes <em>codes</em>' : 'Mon <em>carnet</em>';
@@ -263,154 +262,11 @@ function viewList(kind) {
   return `
     <div class="v-head"><h1 class="v-title">${title}</h1><span class="v-count">${String(all.length).padStart(2, '0')}</span></div>
     <p class="v-sub">${sub}</p>
+    ${kind === 'codes' && exportDue() ? exportNotice() : ''}
     ${all.length ? `<label class="search">${icon('i-search')}<input type="search" data-search="${kind}" value="${esc(q)}" placeholder="Nom, établissement, alias…" autocomplete="off" enterkeyhint="search"></label>
     <div class="chips" role="group">${chipsDef.map(([k, l, n]) => `<button class="chip" data-filter="${kind}:${k}" aria-pressed="${f === k}">${l}<b>${n}</b></button>`).join('')}</div>` : ''}
     ${body}
     <div class="notice">${icon('i-info')}<span><b>Kayit ne paie pas.</b> Le paiement se fait toujours dans l'app de ton opérateur, qui affiche le nom du bénéficiaire : vérifie-le avant de valider.</span></div>`;
-}
-
-// ---------------------------------------------------------------- Profil public
-function shareable(it) {
-  const v = it.alias || it.qrText;
-  return it.owner === 'me' && v && v.length <= 400;
-}
-function b64urlEncode(str) {
-  const bytes = new TextEncoder().encode(str);
-  let bin = '';
-  bytes.forEach(b => { bin += String.fromCharCode(b); });
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-function b64urlDecode(s) {
-  s = s.replace(/-/g, '+').replace(/_/g, '/');
-  while (s.length % 4) s += '=';
-  return new TextDecoder().decode(Uint8Array.from(atob(s), c => c.charCodeAt(0)));
-}
-function baseUrl() {
-  const b = (S.profile.base || '').trim();
-  if (b) return b.replace(/#.*$/, '');
-  return location.origin + location.pathname;
-}
-/* Format de lien v2 (court, synchrone, sans JSON ni base64) :
-   "~" + nom , bio ; entrée ; entrée …   avec entrée = type + provider , pays , libellé , valeur , couleur
-   - type : a = alias texte, u = alias UUID (16 octets -> 22 car. base64url), q = texte de QR
-   - champs vides finaux omis ; couleur = 6 hex sans « # »
-   - échappement : espace -> "+", caractères sûrs gardés tels quels, le reste en %XX (UTF-8).
-     Jamais de , ; % & ? # ' ( ) " < > ` espace ^ { } | \ bruts dans le fragment.
-   Les anciens liens v1 (base64url du JSON, commencent par "ey") restent lisibles. */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const SAFE2_RE = /^[A-Za-z0-9\-._~!$*=:@/]$/;
-const ENC2 = new TextEncoder();
-function esc2(s) {
-  let o = '';
-  for (const ch of String(s)) {
-    if (ch === ' ') o += '+';
-    else if (SAFE2_RE.test(ch)) o += ch;
-    else ENC2.encode(ch).forEach(b => { o += '%' + (b < 16 ? '0' : '') + b.toString(16).toUpperCase(); });
-  }
-  return o;
-}
-function unesc2(s) { return decodeURIComponent(s.replace(/\+/g, ' ')); }
-function uuidPack(u) {
-  const h = u.replace(/-/g, '');
-  let bin = '';
-  for (let i = 0; i < 32; i += 2) bin += String.fromCharCode(parseInt(h.substr(i, 2), 16));
-  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-function uuidUnpack(s) {
-  if (!/^[A-Za-z0-9_-]{22}$/.test(s)) return '';
-  const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==');
-  let h = '';
-  for (let i = 0; i < 16; i++) h += bin.charCodeAt(i).toString(16).padStart(2, '0');
-  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
-}
-const trimEnd2 = arr => { while (arr.length && !arr[arr.length - 1]) arr.pop(); return arr; };
-function encodeProfileV2(name, bio, chosen) {
-  const head = trimEnd2([esc2(name.trim().slice(0, 60)), esc2(bio.trim().slice(0, 120))]).join(',');
-  const ents = chosen.map(i => {
-    const v = i.alias || i.qrText;
-    const t = i.alias ? (UUID_RE.test(v) ? 'u' : 'a') : 'q';
-    const f = trimEnd2([
-      esc2((i.provider || '').slice(0, 40)), esc2((i.country || '').slice(0, 2)), esc2((i.label || '').slice(0, 40)),
-      t === 'u' ? uuidPack(v) : esc2(v), (safeColor(i.color) || '').slice(1),
-    ]);
-    return t + f.join(',');
-  });
-  return '~' + [head, ...ents].join(';').replace(/;+$/, '');
-}
-function decodeProfileV2(p) {
-  if (!p) return null;
-  const str = (x, n) => (x || '').slice(0, n);
-  const segs = p.split(';');
-  const head = segs[0].split(',');
-  const entries = [];
-  for (const seg of segs.slice(1, 31)) {
-    const t = seg[0];
-    if (t !== 'a' && t !== 'u' && t !== 'q') continue;
-    const f = seg.slice(1).split(',');
-    const value = t === 'u' ? uuidUnpack(f[3] || '') : str(unesc2(f[3] || ''), 400);
-    if (!value) continue;
-    entries.push({
-      type: t === 'q' ? 'qr' : 'alias', provider: str(unesc2(f[0] || ''), 40), country: str(unesc2(f[1] || ''), 2),
-      label: str(unesc2(f[2] || ''), 40), value, color: safeColor(/^[0-9a-f]{6}$/i.test(f[4] || '') ? '#' + f[4] : ''),
-    });
-  }
-  return { name: str(unesc2(head[0] || ''), 60), bio: str(unesc2(head[1] || ''), 120), entries };
-}
-function profileLink() {
-  const chosen = S.profile.ids.map(id => S.items.find(i => i.id === id)).filter(i => i && shareable(i));
-  return { url: `${baseUrl()}#/p/${encodeProfileV2(S.profile.name, S.profile.bio, chosen)}`, count: chosen.length };
-}
-function decodeProfile(hash) {
-  try {
-    const raw = hash.split(/[?&]/)[0];
-    if (raw[0] === '~') return decodeProfileV2(raw.slice(1));
-    const d = JSON.parse(b64urlDecode(raw));
-    if (!d || !Array.isArray(d.a)) return null;
-    const str = (x, n) => (typeof x === 'string' ? x.slice(0, n) : '');
-    return {
-      name: str(d.n, 60), bio: str(d.b, 120),
-      entries: d.a.slice(0, 30).filter(Array.isArray).map(e => ({
-        type: e[0] === 'q' ? 'qr' : 'alias', provider: str(e[1], 40), country: str(e[2], 2), label: str(e[3], 40),
-        value: str(e[4], 400), color: safeColor(e[5]),
-      })).filter(e => e.value),
-    };
-  } catch { return null; }
-}
-
-function viewProfil() {
-  const mine = sorted(S.items.filter(i => i.owner === 'me'));
-  const { url, count } = profileLink();
-  const chosen = S.profile.ids.map(id => S.items.find(i => i.id === id)).filter(i => i && shareable(i));
-  const isLocal = /^(http:\/\/)?(localhost|127\.|192\.168\.|10\.)|^file:/.test(baseUrl());
-  return `
-    <div class="v-head"><h1 class="v-title">Mon <em>lien</em></h1></div>
-    <p class="v-sub">Un seul lien pour partager tes moyens de paiement. Tout est dans le lien : rien n'est stocké en ligne.</p>
-    <div class="profile-card">
-      <div class="pc-top"><span class="avatar">${esc(initials(S.profile.name || '?'))}</span>
-        <div><p class="pc-name">${esc(S.profile.name || 'Ton nom')}</p><p class="pc-bio">${esc(S.profile.bio || 'Une petite phrase (optionnelle)')}</p></div></div>
-      <div class="pc-list">${chosen.length ? chosen.map(i => `<span>${esc(i.provider || 'QR')}${i.label ? ' · ' + esc(i.label) : ''}</span>`).join('') : '<span>Aucun moyen de paiement choisi</span>'}</div>
-    </div>
-    <label class="field"><span>Nom affiché</span><input data-prof="name" value="${esc(S.profile.name)}" maxlength="60" placeholder="Ex. Lassana Siby"></label>
-    <label class="field"><span>Petite phrase</span><input data-prof="bio" value="${esc(S.profile.bio)}" maxlength="120" placeholder="Ex. Développeur · Dakar"></label>
-    <p class="section-t">À inclure dans le lien</p>
-    ${mine.length ? mine.map(i => {
-      const ok = shareable(i);
-      return `<label class="pick ${ok ? '' : 'off'}"><input type="checkbox" data-pick="${i.id}" ${S.profile.ids.includes(i.id) && ok ? 'checked' : ''} ${ok ? '' : 'disabled'}>
-        ${badge(i)}<span class="grow"><b>${esc(titleOf(i))}${i.label ? ' · ' + esc(i.label) : ''}</b><small>${ok ? esc(copyValueOf(i)) : 'QR en image seulement — ne peut pas voyager dans un lien'}</small></span></label>`;
-    }).join('') : `<div class="empty"><p>Ajoute d'abord tes codes dans « Mes codes ».</p></div>`}
-    <p class="section-t">Ton lien</p>
-    <div class="link-box">${esc(count ? url : 'Coche au moins un moyen de paiement.')}</div>
-    <div class="grid2">
-      <button class="btn primary" data-action="profile-copy" ${count ? '' : 'disabled'}>${icon('i-copy')}Copier</button>
-      <button class="btn" data-action="profile-share" ${count ? '' : 'disabled'}>${icon('i-share')}Partager</button>
-    </div>
-    <div class="row" style="margin-top:10px">
-      <button class="btn block" data-action="profile-qr" ${count ? '' : 'disabled'}>${icon('i-qr')}Afficher le QR de mon lien</button>
-      <button class="btn block ghost" data-action="profile-preview" ${count ? '' : 'disabled'}>Voir comme les autres le voient</button>
-    </div>
-    ${isLocal ? `<div class="notice">${icon('i-info')}<span><b>Lien local détecté.</b> Pour que les autres puissent l'ouvrir, indique l'adresse dans Réglages › Adresse publique.</span></div>` : ''}
-    <div class="notice">${icon('i-lock')}<span><b>Aucun serveur ne voit ton profil.</b> Tout est dans la partie du lien après le « # », que les navigateurs n'envoient jamais au site. Qui a le lien voit les alias que tu as cochés — rien d'autre.</span></div>
-    <div class="notice">${icon('i-info')}<span><b>Un lien déjà envoyé reste valable.</b> Si tu décoches un moyen de paiement, le lien affiché change, mais les anciens liens gardent ce qu'ils contenaient.Renvoie le nouveau lien aux personnes concernées.</span></div>`;
 }
 
 // ---------------------------------------------------------------- Réglages
@@ -441,15 +297,22 @@ function viewReglages() {
       <button class="set-row" data-action="import-json">${icon('i-share')}<span class="grow"><b>Restaurer une sauvegarde</b><small>Fusionne avec ce qui est déjà là</small></span></button>
     </div>
 
+    <p class="section-t">Verrouillage</p>
+    <div class="set-group">
+      <button class="set-row" data-action="pin-set">${icon('i-lock')}<span class="grow"><b>Code d'accès</b><small>${locked() ? 'Activé · touche pour changer le code' : 'Désactivé · touche pour définir un code à 4–6 chiffres'}</small></span></button>
+      ${locked() ? `<button class="set-row" data-action="bio-toggle">${icon('i-lock')}<span class="grow"><b>Biométrie</b><small>${S.settings.bio ? 'Activée · touche pour la désactiver' : 'Désactivée · touche pour l\'activer'}</small></span></button>` : ''}
+      ${locked() ? `<button class="set-row" data-action="pin-off">${icon('i-x')}<span class="grow"><b>Retirer le code</b><small>Demande le code actuel</small></span></button>` : ''}
+    </div>
+
+    <p class="section-t">Rappel d'export</p>
+    <div class="seg" role="group">${[[0, 'Jamais'], [7, '7 j'], [30, '30 j'], [90, '90 j']].map(([k, l]) => `<button data-export-every="${k}" aria-pressed="${(S.settings.exportEvery || 0) === k}">${l}</button>`).join('')}</div>
+    <p class="v-sub" style="margin:8px 0 16px">Un rappel s'affiche dans « Mes codes » quand ta dernière sauvegarde date de plus de N jours.</p>
+
     <p class="section-t">Logos des établissements</p>
     ${providers().length ? `<div class="set-group">${providers().map(pv => `
       <button class="set-row" data-logo-set="${esc(pv)}">${badge({ owner: 'me', provider: pv })}<span class="grow"><b>${esc(pv)}</b><small>${logoFor(pv) ? 'Touche pour changer le logo' : 'Touche pour importer son logo'}</small></span>
       ${logoFor(pv) ? `<span class="btn sm ghost" data-logo-del="${esc(pv)}">Retirer</span>` : icon('i-image')}</button>`).join('')}</div>`
       : '<p class="v-sub" style="margin:0 0 16px">Ajoute un code pour pouvoir lui mettre un logo.</p>'}
-
-    <p class="section-t">Lien public</p>
-    <label class="field"><span>Adresse publique de l'app</span><input data-base value="${esc(S.profile.base)}" inputmode="url" placeholder="${esc(location.origin + location.pathname)}">
-      <span class="hint">Laisse vide pour utiliser l'adresse actuelle.</span></label>
 
     <p class="section-t">Ce que Kayit ne fait pas</p>
     <div class="set-group">
@@ -466,7 +329,7 @@ function viewReglages() {
 // ---------------------------------------------------------------- Navigation
 function render() {
   const v = $('#view');
-  const map = { codes: () => viewList('codes'), carnet: () => viewList('carnet'), profil: viewProfil, reglages: viewReglages };
+  const map = { codes: () => viewList('codes'), carnet: () => viewList('carnet'), reglages: viewReglages };
   const active = document.activeElement;
   const searchFocus = active && active.dataset && active.dataset.search;
   const caret = searchFocus ? active.selectionStart : 0;
@@ -503,6 +366,7 @@ function closeSheet() {
   if (history.state && history.state.k === 'sheet') history.back(); else hideSheet();
 }
 window.addEventListener('popstate', () => {
+  if (!$('#fsqr').hidden) closeFullQr();
   if (!$('#scanner').hidden) { closeScanner(); }
   if (sheetOpen) hideSheet();
   route();
@@ -543,10 +407,6 @@ function draftFromScan(owner, text, image) {
   return { d, p };
 }
 function handleScanned(owner, text, image) {
-  if (text) {
-    const p = parsePayload(text);
-    if (p.kind === 'profile') { openPublicImport(p.profile); return; }
-  }
   const { d } = draftFromScan(owner, text, image);
   if (!text) toast("Aucun QR lisible — l'image est gardée telle quelle", false);
   openForm(d);
@@ -640,6 +500,7 @@ function openForm(init) {
       <button class="btn sm ghost" type="button" data-l="clear" hidden>Retirer le logo</button>
       <small class="hint" data-lhint>Une capture de l'icône de l'app suffit. Utilisé pour tous tes codes et contacts de cet établissement.</small></span></div>
     <label class="toggle"><span>${icon('i-star')} Favori</span><input type="checkbox" name="fav" ${d.fav ? 'checked' : ''}></label>
+    <label class="field"><span>Étiquettes (optionnel)</span><input name="tags" value="${esc((d.tags || []).join(', '))}" placeholder="Ex. Travail, Famille" maxlength="120" autocomplete="off"><span class="hint">Séparées par des virgules. Pour regrouper et filtrer.</span></label>
     <label class="field"><span>Note (optionnelle)</span><textarea name="note" maxlength="300" placeholder="Ex. compte boutique, à utiliser pour les clients">${esc(d.note)}</textarea></label>
     <div class="grid2"><button class="btn" data-action="close" type="button">Annuler</button><button class="btn primary" type="button" data-save>${icon('i-check')}Enregistrer</button></div>`;
 
@@ -720,6 +581,7 @@ function openForm(init) {
         qrText: f('qrText').value.trim(),
         fav: f('fav').checked,
         note: f('note').value.trim(),
+        tags: parseTags(f('tags').value),
       };
       if (isMe) it.label = f('label').value.trim(); else it.name = f('name').value.trim();
       if (isMe && !it.provider) { toast("Indique l'établissement ou l'app", false); f('provider').focus(); return; }
@@ -756,6 +618,7 @@ function openDetail(id) {
     ${val ? `<button class="big-copy" data-copy><code>${esc(val)}</code><span class="copy-ico">${icon('i-copy')}</span></button>` : ''}
     <div class="grid2">
       ${isUrl ? `<a class="btn" href="${esc(val)}" target="_blank" rel="noopener noreferrer">${icon('i-link')}Ouvrir le lien</a>` : `<button class="btn" data-share>${icon('i-share')}Partager</button>`}
+      <button class="btn" data-full ${img || gen ? '' : 'disabled'}>${icon('i-qr')}Plein écran</button>
       <button class="btn" data-dl ${img || gen ? '' : 'disabled'}>${icon('i-download')}Image du QR</button>
       <button class="btn" data-edit>${icon('i-pen')}Modifier</button>
       <button class="btn danger" data-del>${icon('i-trash')}Supprimer</button>
@@ -785,6 +648,7 @@ function openDetail(id) {
       const text = `${titleOf(it)}${it.label ? ' (' + it.label + ')' : ''}\n${it.alias ? 'Alias PI-SPI : ' : ''}${val}`;
       if (navigator.share) { try { await navigator.share({ text }); } catch { /* annulé */ } } else copyText(text);
     };
+    el.querySelector('[data-full]').onclick = () => openFullQr(mode === 'img' && img ? `<img src="${img}" alt="QR code">` : qrSvg(gen));
     el.querySelector('[data-dl]').onclick = async () => {
       const name = `kayit-${norm(titleOf(it)).replace(/[^a-z0-9]+/g, '-')}.png`;
       const url = mode === 'img' && img ? img : await svgToPng(qrSvg(gen));
@@ -797,98 +661,17 @@ function openDetail(id) {
   });
 }
 
-// ---------------------------------------------------------------- Page publique
-function publicEntryAsItem(e, i, prof) {
-  return { id: 'pub' + i, owner: 'me', type: e.type, provider: e.provider, country: e.country, label: e.label, alias: e.type === 'alias' ? e.value : '', qrText: e.type === 'qr' ? e.value : '', color: e.color, name: prof.name };
-}
-function renderPublic(hash) {
-  const prof = decodeProfile(hash);
-  const box = $('#public');
-  $('#app').hidden = true;
-  box.hidden = false;
-  if (!prof) {
-    box.innerHTML = `<div class="pub-brand"><div class="brand"><svg class="brand-mark" viewBox="0 0 64 64"><use href="#logo"/></svg><span class="brand-name">Kayit</span></div></div>
-      <div class="empty"><h3>Lien illisible</h3><p>Ce lien de profil est incomplet ou abîmé. Demande à la personne de te le renvoyer.</p>
-      <button class="btn primary" data-action="leave-public">Ouvrir Kayit</button></div>`;
-    return;
-  }
-  const items = prof.entries.map((e, i) => publicEntryAsItem(e, i, prof));
-  box.innerHTML = `
-    <div class="pub-brand"><div class="brand"><svg class="brand-mark" viewBox="0 0 64 64"><use href="#logo"/></svg><span class="brand-name">Kayit</span></div>
-      <span class="pill-local">${icon('i-lock')}Profil partagé</span></div>
-    <div class="profile-card"><div class="pc-top"><span class="avatar">${esc(initials(prof.name || '?'))}</span>
-      <div><p class="pc-name">${esc(prof.name || 'Profil sans nom')}</p>${prof.bio ? `<p class="pc-bio">${esc(prof.bio)}</p>` : ''}</div></div>
-      <div class="pc-list"><span>${items.length} moyen${items.length > 1 ? 's' : ''} de paiement</span></div></div>
-    <div class="list">${items.map((it, i) => `
-      <article class="ticket" style="--c:${colorOf(it)};animation-delay:${i * 40}ms" data-pub="${i}">
-        <div class="t-top">${badge(it)}<span class="t-meta"><h3 class="t-name">${esc(it.provider || 'QR code')}</h3>
-          <span class="t-sub">${[esc(it.label), country(it.country) && it.country ? country(it.country)[2] + ' ' + esc(country(it.country)[1]) : ''].filter(Boolean).join(' · ')} ${it.type === 'alias' ? '<span class="tag pi">PI-SPI</span>' : '<span class="tag">QR</span>'}</span></span>
-          <button class="star" data-pubqr="${i}" aria-label="Afficher le QR">${icon('i-qr')}</button></div>
-        <div class="perf"></div>
-        <button class="t-copy" data-pubcopy="${i}"><span class="grow"><span class="lbl">${copyLabel(it)}</span><code class="${it.alias ? '' : 'clip'}">${it.alias ? aliasHtml(it.alias) : esc(it.qrText)}</code></span><span class="copy-ico">${icon('i-copy')}</span></button>
-      </article>`).join('')}</div>
-    <div class="pub-actions">
-      <button class="btn primary block" data-action="pub-save">${icon('i-book')}Enregistrer dans mon carnet</button>
-      <button class="btn block ghost" data-action="leave-public">Ouvrir mon Kayit</button>
-    </div>
-    <div class="notice">${icon('i-info')}<span><b>Pour payer :</b> copie l'alias puis colle-le dans l'app de ton opérateur. Elle t'affichera le nom du bénéficiaire — vérifie-le avant de valider.</span></div>
-    <p class="pub-foot">Ce profil tient entièrement dans le lien. Aucun serveur ne l'a stocké ni lu.</p>`;
-  box.onclick = async e => {
-    const cp = e.target.closest('[data-pubcopy]');
-    if (cp) { const it = items[+cp.dataset.pubcopy]; copyText(copyValueOf(it), cp); return; }
-    const q = e.target.closest('[data-pubqr]');
-    if (q) {
-      const it = items[+q.dataset.pubqr];
-      openSheet(`<h2>${esc(it.provider || 'QR code')}</h2><p class="lead">${esc(prof.name)}${it.label ? ' · ' + esc(it.label) : ''}</p>
-        <div class="qr-stage">${qrSvg(copyValueOf(it))}</div>
-        <p class="qr-caption">${it.alias ? 'QR contenant le texte de l\'alias — si ton app ne le reconnaît pas, copie l\'alias.' : 'Recréé depuis le contenu partagé.'}</p>`);
-      return;
-    }
-    if (e.target.closest('[data-action="pub-save"]')) {
-      await load();
-      let added = 0;
-      for (const it of items) {
-        const v = copyValueOf(it);
-        if (S.items.some(x => x.owner === 'carnet' && (x.alias === v || x.qrText === v))) continue;
-        await save({ ...it, id: uid(), owner: 'carnet', ctype: 'proche', name: prof.name || 'Contact', createdAt: Date.now(), fav: false, note: prof.bio || '' });
-        added++;
-      }
-      toast(added ? `${added} ajouté${added > 1 ? 's' : ''} au carnet` : 'Déjà dans ton carnet');
-    }
-  };
-}
-function openPublicImport(hash) {
-  const prof = decodeProfile(hash);
-  if (!prof) { toast('Lien de profil illisible', false); return; }
-  openSheet(`<h2>${esc(prof.name || 'Profil Kayit')}</h2><p class="lead">${prof.entries.length} moyen(s) de paiement dans ce profil.</p>
-    <div class="action-list">${prof.entries.map(e => `<div class="pick">${badge({ provider: e.provider, color: e.color, owner: 'me' })}<span class="grow"><b>${esc(e.provider || 'QR')}${e.label ? ' · ' + esc(e.label) : ''}</b><small>${esc(e.value)}</small></span></div>`).join('')}</div>
-    <div class="grid2" style="margin-top:14px"><button class="btn" data-action="close">Annuler</button><button class="btn primary" id="imp">Ajouter au carnet</button></div>`,
-  el => {
-    $('#imp', el).onclick = async () => {
-      let added = 0;
-      for (const [i, e] of prof.entries.entries()) {
-        const it = publicEntryAsItem(e, i, prof);
-        const v = copyValueOf(it);
-        if (S.items.some(x => x.owner === 'carnet' && (x.alias === v || x.qrText === v))) continue;
-        await save({ ...it, id: uid(), owner: 'carnet', ctype: 'proche', name: prof.name || 'Contact', createdAt: Date.now(), fav: false, note: prof.bio || '' });
-        added++;
-      }
-      closeSheet(); S.view = 'carnet'; render();
-      toast(added ? `${added} ajouté${added > 1 ? 's' : ''} au carnet` : 'Déjà dans ton carnet');
-    };
-  });
-}
-
 // ---------------------------------------------------------------- Sauvegarde
 async function exportData() {
-  const data = { app: 'kayit', version: 1, exportedAt: new Date().toISOString(), items: S.items, profile: S.profile, logos: S.logos };
+  const data = { app: 'kayit', version: 1, exportedAt: new Date().toISOString(), items: S.items, logos: S.logos };
   const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
   const name = `kayit-sauvegarde-${new Date().toISOString().slice(0, 10)}.json`;
   try {
     const file = new File([blob], name, { type: 'application/json' });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Sauvegarde Kayit' }); return; }
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: 'Sauvegarde Kayit' }); markExported(); return; }
   } catch (e) { if (e && e.name === 'AbortError') return; }
   download(blob, name);
+  markExported();
 }
 async function importData() {
   const f = await pickFile('#pick-json');
@@ -901,6 +684,7 @@ async function importData() {
       name: String(i.name || '').slice(0, 60), provider: String(i.provider || '').slice(0, 40), label: String(i.label || '').slice(0, 40),
       country: String(i.country || '').slice(0, 2), alias: String(i.alias || '').slice(0, 200), qrText: String(i.qrText || '').slice(0, 4000),
       qrImg: safeImg(i.qrImg), logo: safeImg(i.logo), color: safeColor(i.color), fav: !!i.fav, note: String(i.note || '').slice(0, 300),
+      tags: Array.isArray(i.tags) ? i.tags.map(t => String(t).slice(0, 24)).filter(Boolean).slice(0, 6) : [],
       createdAt: +i.createdAt || Date.now(), updatedAt: +i.updatedAt || Date.now(),
     }));
     await db.putMany(clean);
@@ -909,7 +693,6 @@ async function importData() {
       for (const [k, v] of Object.entries(data.logos)) if (safeImg(v) && !merged[k]) merged[k] = v;
       await db.set('logos', merged);
     }
-    if (data.profile && !S.profile.name) { S.profile = Object.assign(S.profile, { name: String(data.profile.name || ''), bio: String(data.profile.bio || ''), ids: Array.isArray(data.profile.ids) ? data.profile.ids : [] }); await saveProfile(); }
     await load(); render();
     toast(`${clean.length} élément${clean.length > 1 ? 's' : ''} restauré${clean.length > 1 ? 's' : ''}`);
   } catch { toast("Ce fichier n'est pas une sauvegarde Kayit", false); }
@@ -921,11 +704,13 @@ document.addEventListener('click', async e => {
   if (nav) { go(nav.dataset.nav); return; }
 
   const flt = e.target.closest('[data-filter]');
-  if (flt) { const [k, v] = flt.dataset.filter.split(':'); S.filter[k] = v; render(); return; }
+  if (flt) { const s = flt.dataset.filter, i = s.indexOf(':'); S.filter[s.slice(0, i)] = s.slice(i + 1); render(); return; }
 
   const th = e.target.closest('[data-theme-set]');
   if (th) { S.settings.theme = th.dataset.themeSet; applyTheme(); await saveSettings(); render(); return; }
 
+  const ee = e.target.closest('[data-export-every]');
+  if (ee) { S.settings.exportEvery = +ee.dataset.exportEvery; await saveSettings(); render(); return; }
   const ld = e.target.closest('[data-logo-del]');
   if (ld) { await setLogo(ld.dataset.logoDel, ''); render(); toast('Logo retiré'); return; }
   const ls = e.target.closest('[data-logo-set]');
@@ -951,30 +736,19 @@ document.addEventListener('click', async e => {
     case 'fav': if (it) { it.fav = !it.fav; await save(it); render(); } break;
     case 'scan-close': closeScanner(); break;
     case 'scan-file': closeScanner(); if (scanFileCb) scanFileCb(); break;
-    case 'profile-copy': copyText(profileLink().url); break;
-    case 'profile-share': {
-      const { url } = profileLink();
-      if (navigator.share) { try { await navigator.share({ title: `Moyens de paiement — ${S.profile.name || 'Kayit'}`, url }); } catch { /* annulé */ } } else copyText(url);
-      break;
-    }
-    case 'profile-qr': {
-      const { url } = profileLink();
-      openSheet(`<h2>Mon lien en QR</h2><p class="lead">Fais-le scanner : la personne voit tous tes moyens de paiement.</p>
-        <div class="qr-stage">${qrSvg(url)}</div><p class="qr-caption">${esc(S.profile.name || '')}</p>
-        <button class="btn block" id="dlp">${icon('i-download')}Enregistrer l'image</button>`,
-      el => { $('#dlp', el).onclick = async () => shareOrDownloadImage(await svgToPng(qrSvg(url)), 'kayit-mon-lien.png', 'Mon lien Kayit'); });
-      break;
-    }
-    case 'profile-preview': { const { url } = profileLink(); location.hash = url.slice(url.indexOf('#')); break; }
-    case 'leave-public': history.replaceState(null, '', location.pathname); route(); break;
     case 'install':
       if (S.installEvt) { S.installEvt.prompt(); await S.installEvt.userChoice.catch(() => null); S.installEvt = null; render(); }
       break;
     case 'export': exportData(); break;
+    case 'export-later': S.settings.exportSnoozeUntil = Date.now() + 3 * 86400000; await saveSettings(); render(); break;
+    case 'fsqr-close': closeFullQr(); break;
+    case 'pin-set': openPinSet(); break;
+    case 'pin-off': openPinOff(); break;
+    case 'bio-toggle': toggleBio(); break;
     case 'import-json': importData(); break;
     case 'wipe':
-      confirmSheet('Tout effacer ?', 'Tous tes codes, ton carnet et ton profil seront supprimés de ce téléphone. Exporte une sauvegarde avant si besoin.', 'Tout effacer', async () => {
-        await db.wipe(); S.items = []; S.profile = { name: '', bio: '', ids: [], base: '' }; S.logos = {}; render(); toast('Tout est effacé');
+      confirmSheet('Tout effacer ?', 'Tous tes codes et ton carnet seront supprimés de ce téléphone. Exporte une sauvegarde avant si besoin.', 'Tout effacer', async () => {
+        await db.wipe(); S.items = []; S.logos = {}; S.settings = { theme: 'auto', exportEvery: 30 }; render(); toast('Tout est effacé');
       });
       break;
     default: break;
@@ -984,34 +758,163 @@ document.addEventListener('click', async e => {
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.dataset.search) { S.q[t.dataset.search] = t.value; render(); return; }
-  if (t.dataset.prof) {
-    S.profile[t.dataset.prof] = t.value; saveProfile();
-    const card = $('.profile-card');
-    if (card) { $('.pc-name', card).textContent = S.profile.name || 'Ton nom'; $('.pc-bio', card).textContent = S.profile.bio || 'Une petite phrase (optionnelle)'; $('.avatar', card).textContent = initials(S.profile.name || '?'); }
-    const lb = $('.link-box');
-    if (lb && profileLink().count) lb.textContent = profileLink().url;
-    return;
-  }
-  if (t.hasAttribute('data-base')) { S.profile.base = t.value.trim(); saveProfile(); }
 });
-document.addEventListener('change', e => {
-  const t = e.target;
-  if (t.dataset.pick) {
-    const id = t.dataset.pick;
-    S.profile.ids = t.checked ? [...new Set([...S.profile.ids, id])] : S.profile.ids.filter(x => x !== id);
-    saveProfile(); render();
-  }
-});
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (!$('#scanner').hidden) closeScanner(); else closeSheet(); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (!$('#fsqr').hidden) closeFullQr(); else if (!$('#scanner').hidden) closeScanner(); else closeSheet(); } });
 
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.installEvt = e; if (S.view === 'reglages') render(); });
 
+// ---------------------------------------------------------------- Étiquettes
+function parseTags(s) {
+  const out = [];
+  for (const raw of String(s || '').split(',')) {
+    const t = raw.trim().slice(0, 24);
+    if (t && !out.some(x => norm(x) === norm(t))) out.push(t);
+  }
+  return out.slice(0, 6);
+}
+
+// ---------------------------------------------------------------- Rappel d'export
+function exportDue() {
+  const n = S.settings.exportEvery || 0;
+  if (!n || !S.items.length) return false;
+  const now = Date.now();
+  if (S.settings.exportSnoozeUntil && now < S.settings.exportSnoozeUntil) return false;
+  const since = S.settings.lastExport || S.settings.exportStart || now;
+  return now - since > n * 86400000;
+}
+function exportNotice() {
+  return `<div class="notice">${icon('i-download')}<span><b>Pense à exporter tes données.</b> Ta dernière sauvegarde date de plus de ${S.settings.exportEvery} jours.</span></div>
+    <div class="grid2" style="margin-bottom:14px"><button class="btn primary" data-action="export">${icon('i-download')}Exporter</button><button class="btn ghost" data-action="export-later">Plus tard</button></div>`;
+}
+function markExported() {
+  S.settings.lastExport = Date.now();
+  S.settings.exportSnoozeUntil = 0;
+  saveSettings();
+  render();
+}
+
+// ---------------------------------------------------------------- Code d'accès
+const ENC = new TextEncoder();
+const randHex = n => [...crypto.getRandomValues(new Uint8Array(n))].map(b => b.toString(16).padStart(2, '0')).join('');
+async function pinHash(pin, salt) {
+  const key = await crypto.subtle.importKey('raw', ENC.encode(pin), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: ENC.encode(salt), iterations: 210000 }, key, 256);
+  return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+const locked = () => !!(S.settings.pin && S.settings.pin.hash);
+let isLocked = false;
+let hiddenAt = 0;
+function showLock() {
+  isLocked = true;
+  if (sheetOpen) hideSheet();
+  closeFullQr();
+  $('#app').hidden = true;
+  $('#lock').hidden = false;
+  $('#lock-err').textContent = '';
+  $('#lock-pin').value = '';
+  $('#lock-bio').hidden = !S.settings.bio;
+  setTimeout(() => $('#lock-pin').focus(), 50);
+  tryBio();
+}
+async function unlock(e) {
+  e.preventDefault();
+  const pin = $('#lock-pin').value;
+  const ok = /^\d{4,6}$/.test(pin) && (await pinHash(pin, S.settings.pin.salt)) === S.settings.pin.hash;
+  if (!ok) { $('#lock-err').textContent = 'Code incorrect'; $('#lock-pin').value = ''; return; }
+  doUnlock();
+}
+function doUnlock() {
+  isLocked = false;
+  $('#lock').hidden = true;
+  $('#lock-pin').value = '';
+  route();
+}
+// Biométrie (WebAuthn, authentificateur de la plateforme) : déverrouillage facultatif, le code reste le repli.
+const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const fromB64u = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+const randBytes = n => crypto.getRandomValues(new Uint8Array(n));
+async function bioAvailable() {
+  try { return !!(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch { return false; }
+}
+async function toggleBio() {
+  if (S.settings.bio) { delete S.settings.bio; await saveSettings(); render(); toast('Biométrie désactivée'); return; }
+  if (!(await bioAvailable())) { toast("Pas de biométrie disponible sur cet appareil", false); return; }
+  try {
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: randBytes(32), rp: { name: 'Kayit' }, user: { id: randBytes(16), name: 'kayit', displayName: 'Kayit' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' },
+      timeout: 60000,
+    } });
+    S.settings.bio = { id: b64u(cred.rawId) };
+    await saveSettings(); render(); toast('Biométrie activée');
+  } catch (e) { toast(e && e.name === 'NotAllowedError' ? 'Activation annulée' : 'Biométrie indisponible ici', false); }
+}
+async function tryBio() {
+  if (!S.settings.bio) return;
+  try {
+    const a = await navigator.credentials.get({ publicKey: {
+      challenge: randBytes(32), allowCredentials: [{ type: 'public-key', id: fromB64u(S.settings.bio.id) }],
+      userVerification: 'required', timeout: 60000,
+    } });
+    if (a) doUnlock();
+  } catch { /* annulé ou refusé : le code reste disponible */ }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (locked() && !isLocked && Date.now() - hiddenAt > 60000) showLock();
+});
+function openPinSet() {
+  openSheet(`<h2>${locked() ? 'Changer le code' : 'Définir un code'}</h2><p class="lead">4 à 6 chiffres. Il est demandé à l'ouverture de l'app et après une minute en arrière-plan.</p>
+    <form id="pinf" class="pinf">
+      <label class="field"><span>Nouveau code</span><input id="p1" type="password" inputmode="numeric" pattern="[0-9]{4,6}" maxlength="6" required></label>
+      <label class="field"><span>Répète le code</span><input id="p2" type="password" inputmode="numeric" pattern="[0-9]{4,6}" maxlength="6" required></label>
+      <p class="lock-err" id="pe"></p>
+      <div class="grid2"><button class="btn" type="button" data-action="close">Annuler</button><button class="btn primary" type="submit">Enregistrer</button></div>
+    </form>`, el => {
+    $('#pinf', el).onsubmit = async e => {
+      e.preventDefault();
+      const a = $('#p1', el).value, b = $('#p2', el).value;
+      if (!/^\d{4,6}$/.test(a)) { $('#pe', el).textContent = '4 à 6 chiffres.'; return; }
+      if (a !== b) { $('#pe', el).textContent = 'Les deux codes ne correspondent pas.'; return; }
+      const salt = randHex(16);
+      S.settings.pin = { salt, hash: await pinHash(a, salt) };
+      await saveSettings(); closeSheet(); render(); toast('Code enregistré');
+    };
+  });
+}
+function openPinOff() {
+  openSheet(`<h2>Retirer le code ?</h2><p class="lead">Saisis le code actuel pour confirmer.</p>
+    <form id="pinoff" class="pinf">
+      <label class="field"><span>Code actuel</span><input id="pc" type="password" inputmode="numeric" maxlength="6" required></label>
+      <p class="lock-err" id="pe"></p>
+      <div class="grid2"><button class="btn" type="button" data-action="close">Annuler</button><button class="btn danger" type="submit">Retirer</button></div>
+    </form>`, el => {
+    $('#pinoff', el).onsubmit = async e => {
+      e.preventDefault();
+      if ((await pinHash($('#pc', el).value, S.settings.pin.salt)) !== S.settings.pin.hash) { $('#pe', el).textContent = 'Code incorrect'; return; }
+      delete S.settings.pin; delete S.settings.bio; await saveSettings(); closeSheet(); render(); toast('Code retiré');
+    };
+  });
+}
+
+// ---------------------------------------------------------------- QR plein écran
+let wakeLock = null;
+async function openFullQr(html) {
+  $('#fsqr .fsqr-stage').innerHTML = html;
+  $('#fsqr').hidden = false;
+  try { wakeLock = await navigator.wakeLock.request('screen'); } catch { wakeLock = null; }
+}
+function closeFullQr() {
+  const box = $('#fsqr');
+  if (box.hidden) return;
+  box.hidden = true;
+  $('#fsqr .fsqr-stage').innerHTML = '';
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+}
+
 // ---------------------------------------------------------------- Démarrage
 function route() {
-  const h = location.hash;
-  if (h.startsWith('#/p/')) { renderPublic(h.slice(4)); return; }
-  $('#public').hidden = true;
-  $('#public').innerHTML = '';
   $('#app').hidden = false;
   render();
 }
@@ -1020,7 +923,10 @@ window.addEventListener('hashchange', route);
 (async function init() {
   await load();
   applyTheme();
-  route();
+  if (!S.settings.exportStart && !S.settings.lastExport) { S.settings.exportStart = Date.now(); await saveSettings(); }
+  $('#lock-form').onsubmit = unlock;
+  $('#lock-bio').onclick = tryBio;
+  if (locked()) showLock(); else route();
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator && isSecureContext && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').catch(() => {});
