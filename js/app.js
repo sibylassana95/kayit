@@ -290,19 +290,81 @@ function baseUrl() {
   if (b) return b.replace(/#.*$/, '');
   return location.origin + location.pathname;
 }
+/* Format de lien v2 (court, synchrone, sans JSON ni base64) :
+   "~" + nom , bio ; entrée ; entrée …   avec entrée = type + provider , pays , libellé , valeur , couleur
+   - type : a = alias texte, u = alias UUID (16 octets -> 22 car. base64url), q = texte de QR
+   - champs vides finaux omis ; couleur = 6 hex sans « # »
+   - échappement : espace -> "+", caractères sûrs gardés tels quels, le reste en %XX (UTF-8).
+     Jamais de , ; % & ? # ' ( ) " < > ` espace ^ { } | \ bruts dans le fragment.
+   Les anciens liens v1 (base64url du JSON, commencent par "ey") restent lisibles. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SAFE2_RE = /^[A-Za-z0-9\-._~!$*=:@/]$/;
+const ENC2 = new TextEncoder();
+function esc2(s) {
+  let o = '';
+  for (const ch of String(s)) {
+    if (ch === ' ') o += '+';
+    else if (SAFE2_RE.test(ch)) o += ch;
+    else ENC2.encode(ch).forEach(b => { o += '%' + (b < 16 ? '0' : '') + b.toString(16).toUpperCase(); });
+  }
+  return o;
+}
+function unesc2(s) { return decodeURIComponent(s.replace(/\+/g, ' ')); }
+function uuidPack(u) {
+  const h = u.replace(/-/g, '');
+  let bin = '';
+  for (let i = 0; i < 32; i += 2) bin += String.fromCharCode(parseInt(h.substr(i, 2), 16));
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function uuidUnpack(s) {
+  if (!/^[A-Za-z0-9_-]{22}$/.test(s)) return '';
+  const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==');
+  let h = '';
+  for (let i = 0; i < 16; i++) h += bin.charCodeAt(i).toString(16).padStart(2, '0');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+const trimEnd2 = arr => { while (arr.length && !arr[arr.length - 1]) arr.pop(); return arr; };
+function encodeProfileV2(name, bio, chosen) {
+  const head = trimEnd2([esc2(name.trim().slice(0, 60)), esc2(bio.trim().slice(0, 120))]).join(',');
+  const ents = chosen.map(i => {
+    const v = i.alias || i.qrText;
+    const t = i.alias ? (UUID_RE.test(v) ? 'u' : 'a') : 'q';
+    const f = trimEnd2([
+      esc2((i.provider || '').slice(0, 40)), esc2((i.country || '').slice(0, 2)), esc2((i.label || '').slice(0, 40)),
+      t === 'u' ? uuidPack(v) : esc2(v), (safeColor(i.color) || '').slice(1),
+    ]);
+    return t + f.join(',');
+  });
+  return '~' + [head, ...ents].join(';').replace(/;+$/, '');
+}
+function decodeProfileV2(p) {
+  if (!p) return null;
+  const str = (x, n) => (x || '').slice(0, n);
+  const segs = p.split(';');
+  const head = segs[0].split(',');
+  const entries = [];
+  for (const seg of segs.slice(1, 31)) {
+    const t = seg[0];
+    if (t !== 'a' && t !== 'u' && t !== 'q') continue;
+    const f = seg.slice(1).split(',');
+    const value = t === 'u' ? uuidUnpack(f[3] || '') : str(unesc2(f[3] || ''), 400);
+    if (!value) continue;
+    entries.push({
+      type: t === 'q' ? 'qr' : 'alias', provider: str(unesc2(f[0] || ''), 40), country: str(unesc2(f[1] || ''), 2),
+      label: str(unesc2(f[2] || ''), 40), value, color: safeColor(/^[0-9a-f]{6}$/i.test(f[4] || '') ? '#' + f[4] : ''),
+    });
+  }
+  return { name: str(unesc2(head[0] || ''), 60), bio: str(unesc2(head[1] || ''), 120), entries };
+}
 function profileLink() {
   const chosen = S.profile.ids.map(id => S.items.find(i => i.id === id)).filter(i => i && shareable(i));
-  const data = {
-    v: 1,
-    n: S.profile.name.trim().slice(0, 60),
-    b: S.profile.bio.trim().slice(0, 120),
-    a: chosen.map(i => [i.alias ? 'a' : 'q', (i.provider || '').slice(0, 40), i.country || '', (i.label || '').slice(0, 40), i.alias || i.qrText, safeColor(i.color) || '']),
-  };
-  return { url: `${baseUrl()}#/p/${b64urlEncode(JSON.stringify(data))}`, count: chosen.length };
+  return { url: `${baseUrl()}#/p/${encodeProfileV2(S.profile.name, S.profile.bio, chosen)}`, count: chosen.length };
 }
 function decodeProfile(hash) {
   try {
-    const d = JSON.parse(b64urlDecode(hash.split(/[?&]/)[0]));
+    const raw = hash.split(/[?&]/)[0];
+    if (raw[0] === '~') return decodeProfileV2(raw.slice(1));
+    const d = JSON.parse(b64urlDecode(raw));
     if (!d || !Array.isArray(d.a)) return null;
     const str = (x, n) => (typeof x === 'string' ? x.slice(0, n) : '');
     return {
@@ -322,7 +384,7 @@ function viewProfil() {
   const isLocal = /^(http:\/\/)?(localhost|127\.|192\.168\.|10\.)|^file:/.test(baseUrl());
   return `
     <div class="v-head"><h1 class="v-title">Mon <em>lien</em></h1></div>
-    <p class="v-sub">Un seul lien pour partager tous tes moyens de paiement. Les données voyagent dans le lien lui-même.</p>
+    <p class="v-sub">Un seul lien pour partager tes moyens de paiement. Tout est dans le lien : rien n'est stocké en ligne.</p>
     <div class="profile-card">
       <div class="pc-top"><span class="avatar">${esc(initials(S.profile.name || '?'))}</span>
         <div><p class="pc-name">${esc(S.profile.name || 'Ton nom')}</p><p class="pc-bio">${esc(S.profile.bio || 'Une petite phrase (optionnelle)')}</p></div></div>
@@ -347,7 +409,8 @@ function viewProfil() {
       <button class="btn block ghost" data-action="profile-preview" ${count ? '' : 'disabled'}>Voir comme les autres le voient</button>
     </div>
     ${isLocal ? `<div class="notice">${icon('i-info')}<span><b>Lien local détecté.</b> Pour que les autres puissent l'ouvrir, héberge Kayit en ligne (O2switch, Vercel…) et indique l'adresse dans Réglages › Adresse publique.</span></div>` : ''}
-    <div class="notice">${icon('i-lock')}<span><b>Aucun serveur ne voit ton profil.</b> Tout est dans la partie du lien après le « # », que les navigateurs n'envoient jamais au site. Qui a le lien voit les alias que tu as cochés — rien d'autre.</span></div>`;
+    <div class="notice">${icon('i-lock')}<span><b>Aucun serveur ne voit ton profil.</b> Tout est dans la partie du lien après le « # », que les navigateurs n'envoient jamais au site. Qui a le lien voit les alias que tu as cochés — rien d'autre.</span></div>
+    <div class="notice">${icon('i-info')}<span><b>Un lien déjà envoyé reste valable.</b> Si tu décoches un moyen de paiement, le lien affiché change, mais les anciens liens gardent ce qu'ils contenaient : sans serveur, on ne peut pas les couper. Renvoie le nouveau lien aux personnes concernées.</span></div>`;
 }
 
 // ---------------------------------------------------------------- Réglages
