@@ -35,6 +35,8 @@
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:16px;line-height:1.45;-webkit-font-smoothing:antialiased}
 body{min-height:100dvh;overscroll-behavior-y:contain}
+/* Désactive le zoom au double-tap (iOS/Android) tout en gardant le zoom à deux doigts (accessibilité). */
+html,body,button,a,input,label{touch-action:manipulation}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer;border:0;background:none;padding:0}
 svg{width:1em;height:1em;flex:none}

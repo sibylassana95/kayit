@@ -1,6 +1,6 @@
 // Service worker Kayit : met l'app en cache pour qu'elle marche hors ligne.
 // Il ne fait aucune requête vers un autre site.
-const CACHE = 'kayit-v1.1.3';
+const CACHE = 'kayit-v1.1.4';
 const FILES = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css', 'js/app.js', 'js/db.js', 'js/qr.js',
   'vendor/jsQR.js', 'vendor/qrcode.js',
