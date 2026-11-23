@@ -408,9 +408,9 @@ function viewProfil() {
       <button class="btn block" data-action="profile-qr" ${count ? '' : 'disabled'}>${icon('i-qr')}Afficher le QR de mon lien</button>
       <button class="btn block ghost" data-action="profile-preview" ${count ? '' : 'disabled'}>Voir comme les autres le voient</button>
     </div>
-    ${isLocal ? `<div class="notice">${icon('i-info')}<span><b>Lien local détecté.</b> Pour que les autres puissent l'ouvrir, héberge Kayit en ligne (O2switch, Vercel…) et indique l'adresse dans Réglages › Adresse publique.</span></div>` : ''}
+    ${isLocal ? `<div class="notice">${icon('i-info')}<span><b>Lien local détecté.</b> Pour que les autres puissent l'ouvrir, indique l'adresse dans Réglages › Adresse publique.</span></div>` : ''}
     <div class="notice">${icon('i-lock')}<span><b>Aucun serveur ne voit ton profil.</b> Tout est dans la partie du lien après le « # », que les navigateurs n'envoient jamais au site. Qui a le lien voit les alias que tu as cochés — rien d'autre.</span></div>
-    <div class="notice">${icon('i-info')}<span><b>Un lien déjà envoyé reste valable.</b> Si tu décoches un moyen de paiement, le lien affiché change, mais les anciens liens gardent ce qu'ils contenaient : sans serveur, on ne peut pas les couper. Renvoie le nouveau lien aux personnes concernées.</span></div>`;
+    <div class="notice">${icon('i-info')}<span><b>Un lien déjà envoyé reste valable.</b> Si tu décoches un moyen de paiement, le lien affiché change, mais les anciens liens gardent ce qu'ils contenaient.Renvoie le nouveau lien aux personnes concernées.</span></div>`;
 }
 
 // ---------------------------------------------------------------- Réglages
