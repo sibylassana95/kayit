@@ -39,12 +39,10 @@
       <button data-nav="codes" class="tab"><svg viewBox="0 0 24 24"><use href="#i-wallet"/></svg><span>Mes codes</span></button>
       <button data-nav="carnet" class="tab"><svg viewBox="0 0 24 24"><use href="#i-book"/></svg><span>Carnet</span></button>
       <button data-action="add" class="tab-fab" aria-label="Ajouter"><svg viewBox="0 0 24 24"><use href="#i-plus"/></svg></button>
-      <button data-nav="profil" class="tab"><svg viewBox="0 0 24 24"><use href="#i-link"/></svg><span>Profil</span></button>
       <button data-nav="reglages" class="tab"><svg viewBox="0 0 24 24"><use href="#i-gear"/></svg><span>Réglages</span></button>
     </nav>
   </div>
 
-  <div id="public" hidden></div>
   <div id="sheet" class="sheet-root" hidden></div>
   <div id="scanner" class="scanner" hidden>
     <video id="scan-video" playsinline muted></video>
@@ -55,6 +53,21 @@
       <button class="btn-round" data-action="scan-file" aria-label="Depuis une image"><svg viewBox="0 0 24 24"><use href="#i-image"/></svg></button>
     </div>
     <p class="scan-hint" id="scan-hint">Le scan se fait sur le téléphone. Aucune image n'est envoyée.</p>
+  </div>
+  <div id="lock" class="lock" hidden>
+    <form class="lock-box" id="lock-form" autocomplete="off">
+      <div class="brand"><svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true"><use href="#logo"/></svg><span class="brand-name">Kayit</span></div>
+      <h1 class="lock-title">Code d'accès</h1>
+      <label class="field"><span>Ton code</span><input id="lock-pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" required></label>
+      <p class="lock-err" id="lock-err" role="alert"></p>
+      <button class="btn primary block" type="submit">Ouvrir</button>
+      <button class="btn block ghost" type="button" id="lock-bio" hidden>Utiliser la biométrie</button>
+    </form>
+  </div>
+  <div id="fsqr" class="fsqr" hidden role="dialog" aria-label="QR code en plein écran">
+    <button class="btn-round fsqr-x" data-action="fsqr-close" aria-label="Fermer"><svg viewBox="0 0 24 24"><use href="#i-x"/></svg></button>
+    <div class="fsqr-stage"></div>
+    <p class="fsqr-cap">Monte la luminosité de ton téléphone au maximum.</p>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <input type="file" id="pick-image" accept="image/*" hidden>

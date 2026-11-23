@@ -22,11 +22,8 @@ function parseTLV(s) {
 /** Analyse le contenu brut d'un QR et en tire ce qu'on peut. Rien n'est inventé. */
 export function parsePayload(text) {
   const raw = (text || '').trim();
-  const r = { raw, alias: '', name: '', city: '', kind: 'text', profile: '' };
+  const r = { raw, alias: '', name: '', city: '', kind: 'text' };
   if (!raw) return r;
-
-  const p = raw.indexOf('#/p/');
-  if (p >= 0) { r.kind = 'profile'; r.profile = raw.slice(p + 4); return r; }
 
   if (/^000201/.test(raw)) {
     const tlv = parseTLV(raw);
