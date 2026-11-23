@@ -64,23 +64,48 @@ async function toDrawable(file) {
 }
 const dims = d => [d.width || d.naturalWidth || d.videoWidth, d.height || d.naturalHeight || d.videoHeight];
 
-function drawScaled(src, max) {
+// withMargin : ajoute une marge blanche autour (zone de silence). Sans elle, un QR qui touche le bord
+// de l'image n'est souvent pas trouvé par jsQR, alors que le scanner du téléphone le lit.
+function drawScaled(src, max, withMargin = false) {
   const [w, h] = dims(src);
   const k = Math.min(1, max / Math.max(w, h));
+  const sw = Math.max(1, Math.round(w * k));
+  const sh = Math.max(1, Math.round(h * k));
+  const m = withMargin ? Math.round(Math.max(sw, sh) * 0.15) : 0;
   const c = document.createElement('canvas');
-  c.width = Math.max(1, Math.round(w * k));
-  c.height = Math.max(1, Math.round(h * k));
+  c.width = sw + 2 * m;
+  c.height = sh + 2 * m;
   const ctx = c.getContext('2d', { willReadFrequently: true });
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, c.width, c.height);
-  ctx.drawImage(src, 0, 0, c.width, c.height);
+  ctx.drawImage(src, m, m, sw, sh);
   return { c, ctx };
 }
 
-function jsqrOn(src, max, inversion = 'attemptBoth') {
-  const { c, ctx } = drawScaled(src, max);
+// Noir/blanc à seuil fixe : jsQR ne trouve pas toujours son propre seuil sur les QR de couleur moyenne (ex. bleu).
+function binarize(data, t) {
+  const out = new Uint8ClampedArray(data.length);
+  for (let i = 0; i < data.length; i += 4) {
+    const l = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    const v = l < t ? 0 : 255;
+    out[i] = out[i + 1] = out[i + 2] = v;
+    out[i + 3] = 255;
+  }
+  return out;
+}
+
+// fallback : essaie aussi des seuils fixes (plus lent, utilisé seulement pour les images importées)
+function jsqrOn(src, max, inversion = 'attemptBoth', fallback = false) {
+  const { c, ctx } = drawScaled(src, max, true);
   const d = ctx.getImageData(0, 0, c.width, c.height);
-  const res = jsQR(d.data, c.width, c.height, { inversionAttempts: inversion });
+  const opts = { inversionAttempts: inversion };
+  let res = jsQR(d.data, c.width, c.height, opts);
+  if (!res && fallback) {
+    for (const t of [170, 150, 190]) {
+      res = jsQR(binarize(d.data, t), c.width, c.height, opts);
+      if (res) break;
+    }
+  }
   return res ? res.data : null;
 }
 
@@ -98,7 +123,7 @@ export async function readImage(file) {
   let text = null;
   const bd = getDetector();
   if (bd) { try { const r = await bd.detect(src); if (r[0]) text = r[0].rawValue; } catch { /* ignore */ } }
-  if (!text) for (const m of [1000, 1600, 700, 2400]) { text = jsqrOn(src, m); if (text) break; }
+  if (!text) for (const m of [1000, 1600, 700, 2400]) { text = jsqrOn(src, m, 'attemptBoth', true); if (text) break; }
   return { text, image: toDataURL(src, 900) };
 }
 
