@@ -54,7 +54,7 @@ svg{width:1em;height:1em;flex:none}
 .pill-local svg{width:13px;height:13px;color:var(--lime)}
 :root[data-theme="light"] .pill-local svg{color:#5d7d0a}
 
-main{padding:4px 20px calc(120px + var(--safe-b));max-width:640px;margin:0 auto;outline:none}
+main{padding:4px 20px calc(100px + var(--safe-b));max-width:640px;margin:0 auto;outline:none}
 
 /* ---------- Titres ---------- */
 .v-head{display:flex;align-items:flex-end;justify-content:space-between;margin:10px 0 16px}
@@ -152,10 +152,13 @@ main{padding:4px 20px calc(120px + var(--safe-b));max-width:640px;margin:0 auto;
 .notice b{color:var(--text);font-weight:600}
 
 /* ---------- Barre d'onglets ---------- */
-.tabbar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(12px + var(--safe-b));z-index:30;
-  width:min(calc(100% - 24px),520px);height:68px;display:grid;grid-template-columns:1fr 1fr 76px 1fr 1fr;align-items:center;
-  background:color-mix(in srgb,var(--surface) 88%,transparent);border:1px solid var(--line);border-radius:24px;
-  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);box-shadow:0 18px 40px -18px rgba(0,0,0,.7)}
+/* Ancrée en bas de l'écran : le fond couvre aussi la zone du home indicator (safe-area),
+   pour qu'aucun contenu ne défile visiblement sous la barre. */
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30;
+  height:calc(68px + var(--safe-b));padding:0 max(12px,calc((100% - 520px) / 2)) var(--safe-b);
+  display:grid;grid-template-columns:1fr 1fr 76px 1fr 1fr;align-items:center;
+  background:color-mix(in srgb,var(--surface) 92%,transparent);border-top:1px solid var(--line);border-radius:24px 24px 0 0;
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);box-shadow:0 -10px 30px -18px rgba(0,0,0,.5)}
 .tab{display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--faint);font-size:.68rem;font-weight:500;height:100%;justify-content:center}
 .tab svg{width:23px;height:23px}
 .tab[aria-current="page"]{color:var(--text)}
@@ -285,7 +288,7 @@ details.raw pre{white-space:pre-wrap;word-break:break-all;font-family:var(--mono
 .scan-hint{position:absolute;bottom:calc(var(--safe-b) + 34px);left:24px;right:24px;text-align:center;font-size:.86rem;color:#cfd8d4;margin:0}
 
 /* ---------- Toast ---------- */
-.toast{position:fixed;left:50%;bottom:calc(98px + var(--safe-b));transform:translate(-50%,20px);z-index:90;opacity:0;pointer-events:none;
+.toast{position:fixed;left:50%;bottom:calc(90px + var(--safe-b));transform:translate(-50%,20px);z-index:90;opacity:0;pointer-events:none;
   background:var(--text);color:var(--bg);padding:11px 18px;border-radius:14px;font-weight:600;font-size:.92rem;transition:.22s;display:flex;gap:8px;align-items:center;white-space:nowrap}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 .toast svg{width:18px;height:18px;color:#7aa311}
