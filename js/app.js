@@ -317,13 +317,13 @@ function viewReglages() {
     <p class="section-t">Ce que Kayit ne fait pas</p>
     <div class="set-group">
       <div class="promise"><i>₣</i><p><b>Il ne paie pas.</b>Le paiement se fait toujours dans l'app de ton opérateur, qui affiche le nom du bénéficiaire.</p></div>
-      <div class="promise"><i>↯</i><p><b>Il n'envoie rien.</b>Aucun compte, aucun serveur, aucune statistique, aucun script tiers.</p></div>
+      <div class="promise"><i>↯</i><p><b>Il n'envoie pas tes codes.</b>Aucun compte. Seules des statistiques de visite anonymes partent vers Matomo.</p></div>
       <div class="promise"><i>⌂</i><p><b>Tout reste ici.</b>Tes codes sont rangés dans ce navigateur, sur ce téléphone. Pense à exporter de temps en temps.</p></div>
     </div>
 
     <p class="section-t">Zone sensible</p>
     <button class="btn danger block" data-action="wipe">${icon('i-trash')}Tout effacer sur ce téléphone</button>
-    <p class="pub-foot">Kayit v${VERSION} · fait à Dakar</p>`;
+    <p class="pub-foot">Kayit v${VERSION} · <a href="https://lassanasiby.com" target="_blank" rel="noopener">lassanasiby.com</a></p>`;
 }
 
 // ---------------------------------------------------------------- Navigation
