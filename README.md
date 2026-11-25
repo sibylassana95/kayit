@@ -28,7 +28,7 @@ python -m http.server 8080
 La caméra et le mode hors ligne exigent **HTTPS** (ou `localhost`). Sur le téléphone, passe par la version en ligne.
 
 ## Mettre en ligne (fichiers statiques, aucun backend)
-- **O2switch** : crée un sous-domaine (ex. `kayit.lassanasiby.com`), active AutoSSL, puis envoie le contenu du dossier dans sa racine. Pas besoin de Passenger.
+- **O2switch** : crée un sous-domaine (ex. `kayit.mondomaine.com`), active AutoSSL, puis envoie le contenu du dossier dans sa racine. Pas besoin de Passenger.
 - **Vercel / Netlify / GitHub Pages** : déploie le dossier tel quel.
 
 Après une mise à jour, change `CACHE` dans `sw.js` (ex. `kayit-v1.0.1`) pour que les téléphones récupèrent la nouvelle version.
@@ -49,3 +49,6 @@ icons/                 icônes de l'app
 
 ## Note PI-SPI
 Kayit ne dépend d'aucun format privé. Il garde le contenu brut de chaque QR, repère un alias au format UUID quand il y en a un et lit les champs EMVCo standard (nom, ville). Un QR recréé depuis le contenu d'origine est identique à l'original. Un QR fabriqué uniquement à partir du texte de l'alias peut ne pas être reconnu par toutes les apps d'opérateur : dans ce cas, copie l'alias.
+
+## Licence
+Distribué sous licence [MIT](LICENSE). Les contributions sont bienvenues : voir [CONTRIBUTING.md](CONTRIBUTING.md).
