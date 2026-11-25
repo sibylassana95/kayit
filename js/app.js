@@ -317,7 +317,7 @@ function viewReglages() {
     <p class="section-t">Ce que Kayit ne fait pas</p>
     <div class="set-group">
       <div class="promise"><i>₣</i><p><b>Il ne paie pas.</b>Le paiement se fait toujours dans l'app de ton opérateur, qui affiche le nom du bénéficiaire.</p></div>
-      <div class="promise"><i>↯</i><p><b>Il n'envoie pas tes codes.</b>Aucun compte. Seules des statistiques de visite anonymes partent vers Matomo.</p></div>
+      <div class="promise"><i>↯</i><p><b>Il n'envoie pas tes codes.</b>Aucun compte.</p></div>
       <div class="promise"><i>⌂</i><p><b>Tout reste ici.</b>Tes codes sont rangés dans ce navigateur, sur ce téléphone. Pense à exporter de temps en temps.</p></div>
     </div>
 
